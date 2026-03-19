@@ -64,6 +64,9 @@ def update():
 
 from io import BytesIO
 
+from io import StringIO
+from flask import Response
+
 @app.route("/export")
 def export():
 
@@ -73,29 +76,26 @@ def export():
     rows = []
 
     for f in data_c["features"]:
-        row = f["properties"]
+        row = f["properties"].copy()
         row["CAPA"] = "CANDIDATA"
         rows.append(row)
 
     for f in data_i["features"]:
-        row = f["properties"]
+        row = f["properties"].copy()
         row["CAPA"] = "INICIAL"
         rows.append(row)
 
     df = pd.DataFrame(rows)
 
-    # 🔥 Crear archivo en memoria
-    output = BytesIO()
-    df.to_excel(output, index=False)
+    output = StringIO()
+    df.to_csv(output, index=False)
     output.seek(0)
 
-    return send_file(
+    return Response(
         output,
-        download_name="pdv.xlsx",
-        as_attachment=True,
-        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment;filename=pdv.csv"}
     )
-
 
 @app.route("/")
 def index():
