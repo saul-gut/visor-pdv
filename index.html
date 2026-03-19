@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet-draw/dist/leaflet.draw.css"/>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-draw/dist/leaflet.draw.js"></script>
+
+<style>
+body{margin:0;font-family:Arial;}
+#map{height:88vh;}
+
+.topbar{
+background:#000;
+color:white;
+padding:6px;
+display:flex;
+gap:12px;
+font-size:11px;
+}
+
+.panel{
+background:#111;
+padding:6px;
+border-radius:6px;
+}
+
+select{font-size:11px;margin:2px;}
+button{font-size:11px;padding:3px 6px;cursor:pointer;}
+
+.legend{
+position:absolute;
+bottom:10px;
+left:10px;
+background:white;
+padding:10px;
+font-size:13px;
+border-radius:6px;
+z-index:1000;
+}
+
+/* 🔥 contador movido */
+.counter{
+position:absolute;
+top:180px;  /* 🔥 más abajo pa no tapar */
+right:10px;
+background:black;
+color:white;
+padding:8px;
+font-size:12px;
+border-radius:6px;
+z-index:1000;
+line-height:1.4;
+}
+</style>
+</head>
+
+<body>
+
+<div class="topbar">
+
+<div class="panel">
+<b>CANDIDATA</b><br>
+Municipio <select id="c_mun"></select>
+Barrio <select id="c_bar"></select>
+Aplica <select id="c_apl"></select>
+<button onclick="resetC()">Reset</button>
+</div>
+
+<div class="panel">
+<b>INICIAL</b><br>
+Municipio <select id="i_mun"></select>
+Barrio <select id="i_bar"></select>
+Aplica <select id="i_apl"></select>
+<button onclick="resetI()">Reset</button>
+</div>
+
+<button onclick="exportExcel()">Export</button>
+
+</div>
+
+<div id="map"></div>
+
+<div class="counter" id="counter"></div>
+
+<div class="legend">
+● <span style="color:blue;">Candidata</span><br>
+● <span style="color:gold;">Inicial</span><br>
+● <span style="color:green;">Aplica SI</span>
+</div>
+
+<script>
+
+var map = L.map('map');
+
+var sat = L.tileLayer(
+'https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+{maxZoom:20,subdomains:['mt0','mt1','mt2','mt3']}
+).addTo(map);
+
+var osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png');
+
+var dataC, dataI;
+var layerC = L.layerGroup().addTo(map);
+var layerI = L.layerGroup().addTo(map);
+
+L.control.layers(
+    {"Satélite":sat,"OSM":osm},
+    {"Candidata":layerC,"Inicial":layerI}
+).addTo(map);
+
+var drawnItems = new L.FeatureGroup().addTo(map);
+
+var drawControl = new L.Control.Draw({
+    draw:{polygon:false,polyline:false,circle:false,marker:false,rectangle:true},
+    edit:false
+});
+map.addControl(drawControl);
+
+// 🔥 RECTÁNGULO (LO QUE TE FALTA)
+map.on('draw:created', function (e) {
+
+    selected=[];
+    let layer = e.layer;
+    drawnItems.clearLayers();
+    drawnItems.addLayer(layer);
+
+    let bounds = layer.getBounds();
+
+    layerC.eachLayer(function(m){
+        if(bounds.contains(m.getLatLng())){
+            selected.push(m);
+            m.setStyle({color:"black",weight:2});
+        }
+    });
+
+    layerI.eachLayer(function(m){
+        if(bounds.contains(m.getLatLng())){
+            selected.push(m);
+            m.setStyle({color:"black",weight:2});
+        }
+    });
+
+    setTimeout(function(){
+
+        if(selected.length>0){
+
+            let val = prompt("Seleccionaste "+selected.length+" puntos. Escribe SI o NO");
+
+            if(!val) return;
+
+            if(confirm("¿Guardar cambios?")){
+
+                let grupos={candidata:[],inicial:[]};
+
+                selected.forEach(function(m){
+                    grupos[m.layerName].push(m.id);
+                    m.setStyle({fillColor:getColor(m.baseColor,val)});
+                
+                    let data = (m.layerName === "candidata") ? dataC : dataI;
+
+                    data.features.forEach(function(f){
+                        let fid = (m.layerName === "candidata")
+                            ? f.properties.USER_id_simulado
+                            : f.properties["USER_Numero_identificación"];
+
+                    if(fid == m.id){
+                        f.properties.APLICA = val || null;
+                    }
+                });
+
+            });
+
+                Object.keys(grupos).forEach(function(layer){
+                    if(grupos[layer].length>0){
+                        fetch("/update",{
+                            method:"POST",
+                            headers:{"Content-Type":"application/json"},
+                            body:JSON.stringify({
+                                layer:layer,
+                                ids:grupos[layer],
+                                aplica:val
+                            })
+                        });
+                    }
+                });
+
+                drawnItems.clearLayers();
+                selected=[];
+                updateCounter(filterC(), filterI());
+            }
+        }
+
+    },100);
+});
+
+var selected = [];
+var initialBounds = null;
+
+// COLOR
+function getColor(base, aplica){
+    if(aplica=="SI") return "green";
+    if(aplica=="NO") return "red";
+    return base;
+}
+
+// UPDATE
+function updateSingle(id, layer, value, marker){
+
+    fetch("/update",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({layer, ids:[id], aplica:value})
+    });
+
+    // ✅ cambia color (igual que antes)
+    marker.setStyle({fillColor:getColor(marker.baseColor,value)});
+
+    // 🔥 NUEVO: actualizar en memoria
+    let data = (layer === "candidata") ? dataC : dataI;
+
+    data.features.forEach(function(f){
+
+        let fid = (layer === "candidata")
+            ? f.properties.USER_id_simulado
+            : f.properties["USER_Numero_identificación"];
+
+        if(fid == id){
+            f.properties.APLICA = value || null;
+        }
+    });
+
+    // 🔥 NUEVO: refrescar contador
+    updateCounter(filterC(), filterI());
+}
+
+// 🔥 CONTADOR
+function updateCounter(fC, fI){
+
+    function calc(features){
+        let si=0,no=0,nulls=0;
+        features.forEach(f=>{
+            if(f.properties.APLICA=="SI") si++;
+            else if(f.properties.APLICA=="NO") no++;
+            else nulls++;
+        });
+        return {total:features.length,si,no,nulls};
+    }
+
+    let c = calc(fC.features);
+    let i = calc(fI.features);
+
+    document.getElementById("counter").innerHTML = `
+    <span style="color:blue">Base candidata: ${c.total}</span><br>
+    <span style="color:green">Si: ${c.si}</span><br>
+    <span style="color:red">No: ${c.no}</span><br>
+    Null: ${c.nulls}<br><br>
+
+    <span style="color:gold">Base inicial: ${i.total}</span><br>
+    <span style="color:green">Si: ${i.si}</span><br>
+    <span style="color:red">No: ${i.no}</span><br>
+    Null: ${i.nulls}
+    `;
+}
+
+// 🔥 FILTROS EN CASCADA
+function updateDependentFilters(){
+
+    let mC = c_mun.value;
+    let aC = c_apl.value;
+
+    let barriosC = [...new Set(
+        dataC.features
+        .filter(f=>{
+            if(mC && f.properties.USER_Municipio!=mC) return false;
+            if(aC && f.properties.APLICA!=aC) return false;
+            return true;
+        })
+        .map(f=>f.properties.USER_Barrio)
+    )];
+
+    let selC = c_bar.value;
+    c_bar.innerHTML="<option value=''>All</option>";
+    barriosC.forEach(v=>c_bar.innerHTML+=`<option ${v==selC?'selected':''}>${v}</option>`);
+
+
+    let mI = i_mun.value;
+    let aI = i_apl.value;
+
+    let barriosI = [...new Set(
+        dataI.features
+        .filter(f=>{
+            if(mI && f.properties.USER_Ciudad!=mI) return false;
+            if(aI && f.properties.APLICA!=aI) return false;
+            return true;
+        })
+        .map(f=>f.properties.USER_Barrio)
+    )];
+
+    let selI = i_bar.value;
+    i_bar.innerHTML="<option value=''>All</option>";
+    barriosI.forEach(v=>i_bar.innerHTML+=`<option ${v==selI?'selected':''}>${v}</option>`);
+}
+
+// DRAW
+function draw(){
+
+    layerC.clearLayers();
+    layerI.clearLayers();
+
+    let fC = filterC();
+    let fI = filterI();
+
+    let boundsC = [];
+    let boundsI = [];
+
+    fC.features.forEach(f=>{
+        let latlng=[f.geometry.coordinates[1],f.geometry.coordinates[0]];
+
+        let m = L.circleMarker(latlng,{
+            radius:5,
+            fillColor:getColor("blue",f.properties.APLICA),
+            color:"#333",
+            weight:0.7,
+            fillOpacity:0.7
+        });
+
+        m.baseColor="blue";
+        m.id=f.properties.USER_id_simulado;
+        m.layerName="candidata";
+
+        m.on('popupopen', function(){
+            window.currentMarker = m;
+        });
+
+        m.bindPopup(`
+        <b>Razón Social:</b> ${f.properties.USER_Razon_Social}<br>
+        <b>Dirección:</b> ${f.properties.USER_Direccion}<br>
+        <b>Barrio:</b> ${f.properties.USER_Barrio}<br>
+        <b>Municipio:</b> ${f.properties.USER_Municipio}<br>
+        <b>Canal:</b> ${f.properties.canal_match}<br>
+        <b>Tipificación:</b> ${f.properties.Tipificacion_match}<br><br>
+
+        <select onchange="updateSingle('${m.id}','candidata',this.value,window.currentMarker)">
+          <option value="">NULL</option>
+          <option value="SI">SI</option>
+          <option value="NO">NO</option>
+        </select>
+        `);
+
+        layerC.addLayer(m);
+        boundsC.push(latlng);
+    });
+
+    fI.features.forEach(f=>{
+        let latlng=[f.geometry.coordinates[1],f.geometry.coordinates[0]];
+
+        let m = L.circleMarker(latlng,{
+            radius:5,
+            fillColor:getColor("gold",f.properties.APLICA),
+            color:"#333",
+            weight:0.7,
+            fillOpacity:0.7
+        });
+
+        m.baseColor="gold";
+        m.id=f.properties["USER_Numero_identificación"];
+        m.layerName="inicial";
+
+        m.on('popupopen', function(){
+            window.currentMarker = m;
+        });
+
+        m.bindPopup(`
+        <b>Razón Social:</b> ${f.properties["USER_Razón_social"]}<br>
+        <b>Nombre establecimiento:</b> ${f.properties.USER_Nombre_establecimiento}<br>
+        <b>Dirección:</b> ${f.properties["USER_Dirección"]}<br>
+        <b>Barrio:</b> ${f.properties.USER_Barrio}<br>
+        <b>Municipio:</b> ${f.properties.USER_Ciudad}<br>
+        <b>Canal:</b> ${f.properties.USER_Canal}<br><br>
+
+        <select onchange="updateSingle('${m.id}','inicial',this.value,window.currentMarker)">
+          <option value="">NULL</option>
+          <option value="SI">SI</option>
+          <option value="NO">NO</option>
+        </select>
+        `);
+
+        layerI.addLayer(m);
+        boundsI.push(latlng);
+    });
+
+    let hasFilterC = c_mun.value || c_bar.value || c_apl.value;
+    let hasFilterI = i_mun.value || i_bar.value || i_apl.value;
+
+    if(!initialBounds && (boundsC.length || boundsI.length)){
+        initialBounds = L.latLngBounds(boundsC.concat(boundsI));
+    }
+
+    if(hasFilterC && boundsC.length){
+        map.fitBounds(boundsC,{padding:[20,20]});
+    }
+    else if(hasFilterI && boundsI.length){
+        map.fitBounds(boundsI,{padding:[20,20]});
+    }
+    else if(!hasFilterC && !hasFilterI && initialBounds){
+        map.fitBounds(initialBounds,{padding:[20,20]});
+    }
+
+    updateCounter(fC,fI);
+}
+
+// FILTROS
+function filterC(){
+    let m=c_mun.value,b=c_bar.value,a=c_apl.value;
+    return {
+        features:dataC.features.filter(f=>{
+            if(m && f.properties.USER_Municipio!=m) return false;
+            if(b && f.properties.USER_Barrio!=b) return false;
+            if(a && f.properties.APLICA!=a) return false;
+            return true;
+        })
+    };
+}
+
+function filterI(){
+    let m=i_mun.value,b=i_bar.value,a=i_apl.value;
+    return {
+        features:dataI.features.filter(f=>{
+            if(m && f.properties.USER_Ciudad!=m) return false;
+            if(b && f.properties.USER_Barrio!=b) return false;
+            if(a && f.properties.APLICA!=a) return false;
+            return true;
+        })
+    };
+}
+
+// RESET
+function resetC(){c_mun.value="";c_bar.value="";c_apl.value="";updateDependentFilters();draw();}
+function resetI(){i_mun.value="";i_bar.value="";i_apl.value="";updateDependentFilters();draw();}
+
+// LOAD
+function load(){
+    fetch("/data")
+    .then(r=>r.json())
+    .then(d=>{
+        dataC=d.candidata;
+        dataI=d.inicial;
+        populate();
+        updateDependentFilters();
+        draw();
+    });
+}
+
+// POPULATE
+function populate(){
+
+    function fill(id,arr){
+        let s=document.getElementById(id);
+        s.innerHTML="<option value=''>All</option>";
+        arr.forEach(v=>s.innerHTML+=`<option>${v}</option>`);
+    }
+
+    fill("c_mun",[...new Set(dataC.features.map(f=>f.properties.USER_Municipio))]);
+    fill("c_bar",[...new Set(dataC.features.map(f=>f.properties.USER_Barrio))]);
+
+    fill("i_mun",[...new Set(dataI.features.map(f=>f.properties.USER_Ciudad))]);
+    fill("i_bar",[...new Set(dataI.features.map(f=>f.properties.USER_Barrio))]);
+
+    fill("c_apl",["SI","NO"]);
+    fill("i_apl",["SI","NO"]);
+}
+
+document.querySelectorAll("select").forEach(s=>{
+    s.onchange = function(){
+        updateDependentFilters();
+        draw();
+    }
+});
+
+function exportExcel(){
+    window.location="/export";
+}
+
+load();
+
+</script>
+</body>
+</html>
