@@ -62,31 +62,39 @@ def update():
     })
 
 
+from io import BytesIO
+
 @app.route("/export")
 def export():
+
     data_c = load_geojson(FILE_CANDIDATA)
     data_i = load_geojson(FILE_INICIAL)
 
     rows = []
 
-    # CANDIDATA
     for f in data_c["features"]:
-        row = f["properties"].copy()
+        row = f["properties"]
         row["CAPA"] = "CANDIDATA"
         rows.append(row)
 
-    # INICIAL
     for f in data_i["features"]:
-        row = f["properties"].copy()
+        row = f["properties"]
         row["CAPA"] = "INICIAL"
         rows.append(row)
 
     df = pd.DataFrame(rows)
 
-    file = "pdv.xlsx"
-    df.to_excel(file, index=False)
+    # 🔥 Crear archivo en memoria
+    output = BytesIO()
+    df.to_excel(output, index=False)
+    output.seek(0)
 
-    return send_file(file, as_attachment=True)
+    return send_file(
+        output,
+        download_name="pdv.xlsx",
+        as_attachment=True,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
 
 @app.route("/")
