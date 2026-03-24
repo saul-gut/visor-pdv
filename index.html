@@ -94,7 +94,7 @@ Aplica <select id="i_apl"></select>
 
 <script>
 
-var map = L.map('map').setView([4.65,-74.1],11);
+var map = L.map('map').setView([6.25,-75.57],11);
 
 var sat = L.tileLayer(
 'https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
@@ -495,10 +495,13 @@ function exportExcel(){
 }
 
 load();
-    map.on("moveend", function(){
-    load();
+let timer;
+map.on("moveend", function(){
+    clearTimeout(timer);
+    timer = setTimeout(function(){
+        load();
+    }, 400);
 });
-
 </script>
 </body>
 </html>
