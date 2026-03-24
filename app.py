@@ -1,6 +1,7 @@
-from flask import Flask, jsonify, request, send_file
+from flask import Flask, jsonify, request, send_file, Response
 import json
 import pandas as pd
+from io import StringIO
 
 app = Flask(__name__)
 
@@ -15,17 +16,42 @@ def load_geojson(path):
 
 def save_geojson(path, data):
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+        json.dump(data, f, ensure_ascii=False)
 
 
+# ===============================
+# DATA POR BBOX (MEJORA GRANDE)
+# ===============================
 @app.route("/data")
 def data():
+    bbox = request.args.get("bbox")
+
+    data_c = load_geojson(FILE_CANDIDATA)
+    data_i = load_geojson(FILE_INICIAL)
+
+    if bbox:
+        xmin, ymin, xmax, ymax = map(float, bbox.split(","))
+
+        def filter_geojson(data):
+            filtered = []
+            for f in data["features"]:
+                x, y = f["geometry"]["coordinates"]
+                if xmin <= x <= xmax and ymin <= y <= ymax:
+                    filtered.append(f)
+            return {"type": "FeatureCollection", "features": filtered}
+
+        data_c = filter_geojson(data_c)
+        data_i = filter_geojson(data_i)
+
     return jsonify({
-        "candidata": load_geojson(FILE_CANDIDATA),
-        "inicial": load_geojson(FILE_INICIAL)
+        "candidata": data_c,
+        "inicial": data_i
     })
 
 
+# ===============================
+# UPDATE
+# ===============================
 @app.route("/update", methods=["POST"])
 def update():
     req = request.json
@@ -37,7 +63,6 @@ def update():
     file_path = FILE_CANDIDATA if layer == "candidata" else FILE_INICIAL
     data = load_geojson(file_path)
 
-    # 🔥 CLAVE: usar campo correcto según capa
     if layer == "candidata":
         key = "USER_id_simulado"
     else:
@@ -54,22 +79,17 @@ def update():
 
     save_geojson(file_path, data)
 
-    print(f"Actualizados {cambios} registros en {layer}")
-
     return jsonify({
         "status": "ok",
         "updated": cambios
     })
 
 
-from io import BytesIO
-
-from io import StringIO
-from flask import Response
-
+# ===============================
+# EXPORT CSV
+# ===============================
 @app.route("/export")
 def export():
-
     data_c = load_geojson(FILE_CANDIDATA)
     data_i = load_geojson(FILE_INICIAL)
 
@@ -97,9 +117,13 @@ def export():
         headers={"Content-Disposition": "attachment;filename=pdv.csv"}
     )
 
+
+# ===============================
+# INDEX
+# ===============================
 @app.route("/")
 def index():
-    return open("index.html", encoding="utf-8").read()
+    return send_file("index.html")
 
 
 if __name__ == "__main__":
