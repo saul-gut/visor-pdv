@@ -94,7 +94,7 @@ Aplica <select id="i_apl"></select>
 
 <script>
 
-var map = L.map('map');
+var map = L.map('map').setView([4.65,-74.1],11);
 
 var sat = L.tileLayer(
 'https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
@@ -106,6 +106,7 @@ var osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png');
 var dataC, dataI;
 var layerC = L.layerGroup().addTo(map);
 var layerI = L.layerGroup().addTo(map);
+var firstLoad = true;
 
 L.control.layers(
     {"Satélite":sat,"OSM":osm},
@@ -444,12 +445,20 @@ function resetI(){i_mun.value="";i_bar.value="";i_apl.value="";updateDependentFi
 
 // LOAD
 function load(){
-    fetch("/data")
+
+    let bbox = map.getBounds().toBBoxString();
+
+    fetch("/data?bbox=" + bbox)
     .then(r=>r.json())
     .then(d=>{
         dataC=d.candidata;
         dataI=d.inicial;
-        populate();
+
+        if(firstLoad){
+            populate();
+            firstLoad = false;
+        }
+
         updateDependentFilters();
         draw();
     });
@@ -486,6 +495,9 @@ function exportExcel(){
 }
 
 load();
+    map.on("moveend", function(){
+    load();
+});
 
 </script>
 </body>
