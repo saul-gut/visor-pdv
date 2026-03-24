@@ -9,25 +9,26 @@ FILE_CANDIDATA = "candidata.geojson"
 FILE_INICIAL = "inicial.geojson"
 
 
+# ===============================
+# CARGAR GEOJSON UNA SOLA VEZ
+# ===============================
 def load_geojson(path):
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
-
-def save_geojson(path, data):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False)
+data_candidata = load_geojson(FILE_CANDIDATA)
+data_inicial = load_geojson(FILE_INICIAL)
 
 
 # ===============================
-# DATA POR BBOX (MEJORA GRANDE)
+# DATA POR BBOX
 # ===============================
 @app.route("/data")
 def data():
     bbox = request.args.get("bbox")
 
-    data_c = load_geojson(FILE_CANDIDATA)
-    data_i = load_geojson(FILE_INICIAL)
+    data_c = data_candidata
+    data_i = data_inicial
 
     if bbox:
         xmin, ymin, xmax, ymax = map(float, bbox.split(","))
@@ -60,47 +61,42 @@ def update():
     ids = req.get("ids", [])
     aplica = req.get("aplica")
 
-    file_path = FILE_CANDIDATA if layer == "candidata" else FILE_INICIAL
-    data = load_geojson(file_path)
+    data = data_candidata if layer == "candidata" else data_inicial
 
     if layer == "candidata":
         key = "USER_id_simulado"
+        file_path = FILE_CANDIDATA
     else:
         key = "USER_Numero_identificación"
+        file_path = FILE_INICIAL
 
     cambios = 0
 
     for f in data["features"]:
         feature_id = f["properties"].get(key)
-
         if feature_id in ids:
             f["properties"]["APLICA"] = aplica
             cambios += 1
 
-    save_geojson(file_path, data)
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
 
-    return jsonify({
-        "status": "ok",
-        "updated": cambios
-    })
+    return jsonify({"status": "ok", "updated": cambios})
 
 
 # ===============================
-# EXPORT CSV
+# EXPORT
 # ===============================
 @app.route("/export")
 def export():
-    data_c = load_geojson(FILE_CANDIDATA)
-    data_i = load_geojson(FILE_INICIAL)
-
     rows = []
 
-    for f in data_c["features"]:
+    for f in data_candidata["features"]:
         row = f["properties"].copy()
         row["CAPA"] = "CANDIDATA"
         rows.append(row)
 
-    for f in data_i["features"]:
+    for f in data_inicial["features"]:
         row = f["properties"].copy()
         row["CAPA"] = "INICIAL"
         rows.append(row)
@@ -118,9 +114,6 @@ def export():
     )
 
 
-# ===============================
-# INDEX
-# ===============================
 @app.route("/")
 def index():
     return send_file("index.html")
