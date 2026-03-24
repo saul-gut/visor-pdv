@@ -94,7 +94,7 @@ Aplica <select id="i_apl"></select>
 
 <script>
 
-var map = L.map('map').setView([6.25,-75.57],11);
+var map = L.map('map', { preferCanvas: true }).setView([6.25,-75.57],11);
 
 var sat = L.tileLayer(
 'https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
@@ -315,101 +315,32 @@ function draw(){
     let fC = filterC();
     let fI = filterI();
 
-    let boundsC = [];
-    let boundsI = [];
-
-    fC.features.forEach(f=>{
-        let latlng=[f.geometry.coordinates[1],f.geometry.coordinates[0]];
-
-        let m = L.circleMarker(latlng,{
-            radius:5,
-            fillColor:getColor("blue",f.properties.APLICA),
-            color:"#333",
-            weight:0.7,
-            fillOpacity:0.7
-        });
-
-        m.baseColor="blue";
-        m.id=f.properties.USER_id_simulado;
-        m.layerName="candidata";
-
-        m.on('popupopen', function(){
-            window.currentMarker = m;
-        });
-
-        m.bindPopup(`
-        <b>Razón Social:</b> ${f.properties.USER_Razon_Social}<br>
-        <b>Dirección:</b> ${f.properties.USER_Direccion}<br>
-        <b>Barrio:</b> ${f.properties.USER_Barrio}<br>
-        <b>Municipio:</b> ${f.properties.USER_Municipio}<br>
-        <b>Canal:</b> ${f.properties.canal_match}<br>
-        <b>Tipificación:</b> ${f.properties.Tipificacion_match}<br><br>
-
-        <select onchange="updateSingle('${m.id}','candidata',this.value,window.currentMarker)">
-          <option value="">NULL</option>
-          <option value="SI">SI</option>
-          <option value="NO">NO</option>
-        </select>
-        `);
-
-        layerC.addLayer(m);
-        boundsC.push(latlng);
+    let geoC = L.geoJSON(fC, {
+        pointToLayer: function(feature, latlng){
+            return L.circleMarker(latlng,{
+                radius:4,
+                fillColor:getColor("blue",feature.properties.APLICA),
+                color:"#333",
+                weight:0.5,
+                fillOpacity:0.7
+            });
+        }
     });
 
-    fI.features.forEach(f=>{
-        let latlng=[f.geometry.coordinates[1],f.geometry.coordinates[0]];
-
-        let m = L.circleMarker(latlng,{
-            radius:5,
-            fillColor:getColor("gold",f.properties.APLICA),
-            color:"#333",
-            weight:0.7,
-            fillOpacity:0.7
-        });
-
-        m.baseColor="gold";
-        m.id=f.properties["USER_Numero_identificación"];
-        m.layerName="inicial";
-
-        m.on('popupopen', function(){
-            window.currentMarker = m;
-        });
-
-        m.bindPopup(`
-        <b>Razón Social:</b> ${f.properties["USER_Razón_social"]}<br>
-        <b>Nombre establecimiento:</b> ${f.properties.USER_Nombre_establecimiento}<br>
-        <b>Dirección:</b> ${f.properties["USER_Dirección"]}<br>
-        <b>Barrio:</b> ${f.properties.USER_Barrio}<br>
-        <b>Municipio:</b> ${f.properties.USER_Ciudad}<br>
-        <b>Canal:</b> ${f.properties.USER_Canal}<br><br>
-
-        <select onchange="updateSingle('${m.id}','inicial',this.value,window.currentMarker)">
-          <option value="">NULL</option>
-          <option value="SI">SI</option>
-          <option value="NO">NO</option>
-        </select>
-        `);
-
-        layerI.addLayer(m);
-        boundsI.push(latlng);
+    let geoI = L.geoJSON(fI, {
+        pointToLayer: function(feature, latlng){
+            return L.circleMarker(latlng,{
+                radius:4,
+                fillColor:getColor("gold",feature.properties.APLICA),
+                color:"#333",
+                weight:0.5,
+                fillOpacity:0.7
+            });
+        }
     });
 
-    let hasFilterC = c_mun.value || c_bar.value || c_apl.value;
-    let hasFilterI = i_mun.value || i_bar.value || i_apl.value;
-
-    if(!initialBounds && (boundsC.length || boundsI.length)){
-        initialBounds = L.latLngBounds(boundsC.concat(boundsI));
-    }
-
-    if(hasFilterC && boundsC.length){
-        map.fitBounds(boundsC,{padding:[20,20]});
-    }
-    else if(hasFilterI && boundsI.length){
-        map.fitBounds(boundsI,{padding:[20,20]});
-    }
-    else if(!hasFilterC && !hasFilterI && initialBounds){
-        map.fitBounds(initialBounds,{padding:[20,20]});
-    }
+    layerC.addLayer(geoC);
+    layerI.addLayer(geoI);
 
     updateCounter(fC,fI);
 }
@@ -495,12 +426,19 @@ function exportExcel(){
 }
 
 load();
-let timer;
+let lastBounds;
+
 map.on("moveend", function(){
-    clearTimeout(timer);
-    timer = setTimeout(function(){
-        load();
-    }, 400);
+
+    let b = map.getBounds();
+
+    if(lastBounds && lastBounds.contains(b)){
+        return;
+    }
+
+    lastBounds = b;
+
+    load();
 });
 </script>
 </body>
