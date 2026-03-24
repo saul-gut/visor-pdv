@@ -104,8 +104,8 @@ var sat = L.tileLayer(
 var osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png');
 
 var dataC, dataI;
-var layerC = L.layerGroup().addTo(map);
-var layerI = L.layerGroup().addTo(map);
+var layerC = L.canvas({ padding: 0.5 });
+var layerI = L.canvas({ padding: 0.5 });
 var firstLoad = true;
 
 L.control.layers(
@@ -318,7 +318,7 @@ function draw(){
     let geoC = L.geoJSON(fC, {
         pointToLayer: function(feature, latlng){
             return L.circleMarker(latlng,{
-                radius:4,
+                radius:3,
                 fillColor:getColor("blue",feature.properties.APLICA),
                 color:"#333",
                 weight:0.5,
@@ -330,7 +330,7 @@ function draw(){
     let geoI = L.geoJSON(fI, {
         pointToLayer: function(feature, latlng){
             return L.circleMarker(latlng,{
-                radius:4,
+                radius:3,
                 fillColor:getColor("gold",feature.properties.APLICA),
                 color:"#333",
                 weight:0.5,
@@ -426,20 +426,7 @@ function exportExcel(){
 }
 
 load();
-let lastBounds;
 
-map.on("moveend", function(){
-
-    let b = map.getBounds();
-
-    if(lastBounds && lastBounds.contains(b)){
-        return;
-    }
-
-    lastBounds = b;
-
-    load();
-});
 </script>
 </body>
 </html>
