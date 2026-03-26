@@ -58,7 +58,7 @@ button:hover { background: #666; }
 
 .counter {
   position: absolute;
-  top: 14vh;
+  bottom: 10px;
   right: 10px;
   background: rgba(0,0,0,0.85);
   color: white;
@@ -172,66 +172,7 @@ function getColor(base, aplica) {
   return base;
 }
 
-// ─────────────────────────────────────────────
-// 🔥 FIX 3: Carga por BBOX
-//    Solo pide los puntos visibles en el mapa.
-//    Al moverse o hacer zoom, recarga solo lo nuevo.
-// ─────────────────────────────────────────────
-var loadTimeout = null;
 
-function getBbox() {
-  var b = map.getBounds();
-  return [
-    b.getWest().toFixed(6),
-    b.getSouth().toFixed(6),
-    b.getEast().toFixed(6),
-    b.getNorth().toFixed(6)
-  ].join(",");
-}
-
-function loadByBbox() {
-  // Debounce: espera 300ms después del último evento
-  clearTimeout(loadTimeout);
-  loadTimeout = setTimeout(function() {
-    var bbox = getBbox();
-    document.getElementById("loading").style.display = "block";
-
-    fetch("/data?bbox=" + bbox)
-      .then(r => r.json())
-      .then(d => {
-        // Merge: combinar datos nuevos con los ya en memoria
-        mergeData(d.candidata, d.inicial);
-        updateDependentFilters();
-        draw();
-        document.getElementById("loading").style.display = "none";
-      })
-      .catch(() => {
-        document.getElementById("loading").style.display = "none";
-      });
-  }, 300);
-}
-
-// ─────────────────────────────────────────────
-// MERGE: agrega features nuevas sin duplicar
-// ─────────────────────────────────────────────
-function mergeData(newC, newI) {
-  if (!dataC) { dataC = newC; } else {
-    var existingIds = new Set(dataC.features.map(f => f.properties.USER_id_simulado));
-    newC.features.forEach(f => {
-      if (!existingIds.has(f.properties.USER_id_simulado)) {
-        dataC.features.push(f);
-      }
-    });
-  }
-  if (!dataI) { dataI = newI; } else {
-    var existingIds2 = new Set(dataI.features.map(f => f.properties["USER_Numero_identificación"]));
-    newI.features.forEach(f => {
-      if (!existingIds2.has(f.properties["USER_Numero_identificación"])) {
-        dataI.features.push(f);
-      }
-    });
-  }
-}
 
 // ─────────────────────────────────────────────
 // DRAW — solo dibuja features filtradas
@@ -541,9 +482,6 @@ function initialLoad() {
 
       draw();
       document.getElementById("loading").style.display = "none";
-
-      // 🔥 Después de la carga inicial, actualizar al mover/zoom
-      map.on('moveend', loadByBbox);
     })
     .catch(() => {
       document.getElementById("loading").style.display = "none";
