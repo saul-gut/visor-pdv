@@ -2,6 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8"/>
+<title>Visor PDV</title>
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-draw/dist/leaflet.draw.css"/>
@@ -10,50 +11,77 @@
 <script src="https://unpkg.com/leaflet-draw/dist/leaflet.draw.js"></script>
 
 <style>
-body{margin:0;font-family:Arial;}
-#map{height:88vh;}
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; font-family: Arial, sans-serif; }
+#map { height: 88vh; }
 
-.topbar{
-background:#000;
-color:white;
-padding:6px;
-display:flex;
-gap:12px;
-font-size:11px;
+.topbar {
+  background: #111;
+  color: white;
+  padding: 6px 10px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 11px;
+  height: 12vh;
+  overflow: hidden;
 }
 
-.panel{
-background:#111;
-padding:6px;
-border-radius:6px;
+.panel {
+  background: #222;
+  padding: 5px 8px;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
 }
 
-select{font-size:11px;margin:2px;}
-button{font-size:11px;padding:3px 6px;cursor:pointer;}
+.panel b { margin-right: 4px; }
+select { font-size: 11px; padding: 2px; }
+button { font-size: 11px; padding: 3px 8px; cursor: pointer; background: #444; color: white; border: none; border-radius: 3px; }
+button:hover { background: #666; }
 
-.legend{
-position:absolute;
-bottom:10px;
-left:10px;
-background:white;
-padding:10px;
-font-size:13px;
-border-radius:6px;
-z-index:1000;
+.legend {
+  position: absolute;
+  bottom: 10px;
+  left: 10px;
+  background: white;
+  padding: 8px 12px;
+  font-size: 12px;
+  border-radius: 6px;
+  z-index: 1000;
+  line-height: 1.8;
+  box-shadow: 0 1px 5px rgba(0,0,0,0.3);
 }
 
-/* 🔥 contador movido */
-.counter{
-position:absolute;
-top:180px;  /* 🔥 más abajo pa no tapar */
-right:10px;
-background:black;
-color:white;
-padding:8px;
-font-size:12px;
-border-radius:6px;
-z-index:1000;
-line-height:1.4;
+.counter {
+  position: absolute;
+  top: 14vh;
+  right: 10px;
+  background: rgba(0,0,0,0.85);
+  color: white;
+  padding: 8px 12px;
+  font-size: 11px;
+  border-radius: 6px;
+  z-index: 1000;
+  line-height: 1.6;
+  min-width: 140px;
+}
+
+#loading {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(0,0,0,0.75);
+  color: white;
+  padding: 14px 24px;
+  border-radius: 8px;
+  font-size: 13px;
+  z-index: 2000;
+  display: none;
 }
 </style>
 </head>
@@ -62,430 +90,479 @@ line-height:1.4;
 
 <div class="topbar">
 
-<div class="panel">
-<b>CANDIDATA</b><br>
-Municipio <select id="c_mun"></select>
-Barrio <select id="c_bar"></select>
-Aplica <select id="c_apl"></select>
-<button onclick="resetC()">Reset</button>
-</div>
+  <div class="panel">
+    <b>CANDIDATA</b>
+    Municipio <select id="c_mun"></select>
+    Barrio <select id="c_bar"></select>
+    Aplica <select id="c_apl"></select>
+    <button onclick="resetC()">Reset</button>
+  </div>
 
-<div class="panel">
-<b>INICIAL</b><br>
-Municipio <select id="i_mun"></select>
-Barrio <select id="i_bar"></select>
-Aplica <select id="i_apl"></select>
-<button onclick="resetI()">Reset</button>
-</div>
+  <div class="panel">
+    <b>INICIAL</b>
+    Municipio <select id="i_mun"></select>
+    Barrio <select id="i_bar"></select>
+    Aplica <select id="i_apl"></select>
+    <button onclick="resetI()">Reset</button>
+  </div>
 
-<button onclick="exportExcel()">Export</button>
+  <button onclick="exportExcel()">Export</button>
 
 </div>
 
 <div id="map"></div>
-
+<div id="loading">Cargando puntos…</div>
 <div class="counter" id="counter"></div>
 
 <div class="legend">
-● <span style="color:blue;">Candidata</span><br>
-● <span style="color:gold;">Inicial</span><br>
-● <span style="color:green;">Aplica SI</span>
+  ● <span style="color:blue;">Candidata</span><br>
+  ● <span style="color:goldenrod;">Inicial</span><br>
+  ● <span style="color:green;">Aplica SI</span><br>
+  ● <span style="color:red;">Aplica NO</span>
 </div>
 
 <script>
 
+// ─────────────────────────────────────────────
+// 🔥 FIX 1: Canvas renderer — un solo elemento
+//    en lugar de 15.000 nodos SVG en el DOM
+// ─────────────────────────────────────────────
+var renderer = L.canvas({ padding: 0.5 });
+
 var map = L.map('map');
 
 var sat = L.tileLayer(
-'https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
-{maxZoom:20,subdomains:['mt0','mt1','mt2','mt3']}
+  'https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+  { maxZoom: 20, subdomains: ['mt0','mt1','mt2','mt3'] }
 ).addTo(map);
 
 var osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png');
 
 var dataC, dataI;
+
+// ─────────────────────────────────────────────
+// 🔥 FIX 2: Separar capas C e I en sub-capas
+//    por estado (null/SI/NO) para poder
+//    mostrar/ocultar sin redibujar
+// ─────────────────────────────────────────────
 var layerC = L.layerGroup().addTo(map);
 var layerI = L.layerGroup().addTo(map);
 
 L.control.layers(
-    {"Satélite":sat,"OSM":osm},
-    {"Candidata":layerC,"Inicial":layerI}
+  { "Satélite": sat, "OSM": osm },
+  { "Candidata": layerC, "Inicial": layerI }
 ).addTo(map);
 
 var drawnItems = new L.FeatureGroup().addTo(map);
-
 var drawControl = new L.Control.Draw({
-    draw:{polygon:false,polyline:false,circle:false,marker:false,rectangle:true},
-    edit:false
+  draw: { polygon: false, polyline: false, circle: false, marker: false, rectangle: true },
+  edit: false
 });
 map.addControl(drawControl);
-
-// 🔥 RECTÁNGULO (LO QUE TE FALTA)
-map.on('draw:created', function (e) {
-
-    selected=[];
-    let layer = e.layer;
-    drawnItems.clearLayers();
-    drawnItems.addLayer(layer);
-
-    let bounds = layer.getBounds();
-
-    layerC.eachLayer(function(m){
-        if(bounds.contains(m.getLatLng())){
-            selected.push(m);
-            m.setStyle({color:"black",weight:2});
-        }
-    });
-
-    layerI.eachLayer(function(m){
-        if(bounds.contains(m.getLatLng())){
-            selected.push(m);
-            m.setStyle({color:"black",weight:2});
-        }
-    });
-
-    setTimeout(function(){
-
-        if(selected.length>0){
-
-            let val = prompt("Seleccionaste "+selected.length+" puntos. Escribe SI o NO");
-
-            if(!val) return;
-
-            if(confirm("¿Guardar cambios?")){
-
-                let grupos={candidata:[],inicial:[]};
-
-                selected.forEach(function(m){
-                    grupos[m.layerName].push(m.id);
-                    m.setStyle({fillColor:getColor(m.baseColor,val)});
-                
-                    let data = (m.layerName === "candidata") ? dataC : dataI;
-
-                    data.features.forEach(function(f){
-                        let fid = (m.layerName === "candidata")
-                            ? f.properties.USER_id_simulado
-                            : f.properties["USER_Numero_identificación"];
-
-                    if(fid == m.id){
-                        f.properties.APLICA = val || null;
-                    }
-                });
-
-            });
-
-                Object.keys(grupos).forEach(function(layer){
-                    if(grupos[layer].length>0){
-                        fetch("/update",{
-                            method:"POST",
-                            headers:{"Content-Type":"application/json"},
-                            body:JSON.stringify({
-                                layer:layer,
-                                ids:grupos[layer],
-                                aplica:val
-                            })
-                        });
-                    }
-                });
-
-                drawnItems.clearLayers();
-                selected=[];
-                updateCounter(filterC(), filterI());
-            }
-        }
-
-    },100);
-});
 
 var selected = [];
 var initialBounds = null;
 
-// COLOR
-function getColor(base, aplica){
-    if(aplica=="SI") return "green";
-    if(aplica=="NO") return "red";
-    return base;
+// ─────────────────────────────────────────────
+// COLORES
+// ─────────────────────────────────────────────
+function getColor(base, aplica) {
+  if (aplica === "SI") return "green";
+  if (aplica === "NO") return "red";
+  return base;
 }
 
-// UPDATE
-function updateSingle(id, layer, value, marker){
+// ─────────────────────────────────────────────
+// 🔥 FIX 3: Carga por BBOX
+//    Solo pide los puntos visibles en el mapa.
+//    Al moverse o hacer zoom, recarga solo lo nuevo.
+// ─────────────────────────────────────────────
+var loadTimeout = null;
 
-    fetch("/update",{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({layer, ids:[id], aplica:value})
-    });
-
-    // ✅ cambia color (igual que antes)
-    marker.setStyle({fillColor:getColor(marker.baseColor,value)});
-
-    // 🔥 NUEVO: actualizar en memoria
-    let data = (layer === "candidata") ? dataC : dataI;
-
-    data.features.forEach(function(f){
-
-        let fid = (layer === "candidata")
-            ? f.properties.USER_id_simulado
-            : f.properties["USER_Numero_identificación"];
-
-        if(fid == id){
-            f.properties.APLICA = value || null;
-        }
-    });
-
-    // 🔥 NUEVO: refrescar contador
-    updateCounter(filterC(), filterI());
+function getBbox() {
+  var b = map.getBounds();
+  return [
+    b.getWest().toFixed(6),
+    b.getSouth().toFixed(6),
+    b.getEast().toFixed(6),
+    b.getNorth().toFixed(6)
+  ].join(",");
 }
 
-// 🔥 CONTADOR
-function updateCounter(fC, fI){
+function loadByBbox() {
+  // Debounce: espera 300ms después del último evento
+  clearTimeout(loadTimeout);
+  loadTimeout = setTimeout(function() {
+    var bbox = getBbox();
+    document.getElementById("loading").style.display = "block";
 
-    function calc(features){
-        let si=0,no=0,nulls=0;
-        features.forEach(f=>{
-            if(f.properties.APLICA=="SI") si++;
-            else if(f.properties.APLICA=="NO") no++;
-            else nulls++;
-        });
-        return {total:features.length,si,no,nulls};
-    }
-
-    let c = calc(fC.features);
-    let i = calc(fI.features);
-
-    document.getElementById("counter").innerHTML = `
-    <span style="color:blue">Base candidata: ${c.total}</span><br>
-    <span style="color:green">Si: ${c.si}</span><br>
-    <span style="color:red">No: ${c.no}</span><br>
-    Null: ${c.nulls}<br><br>
-
-    <span style="color:gold">Base inicial: ${i.total}</span><br>
-    <span style="color:green">Si: ${i.si}</span><br>
-    <span style="color:red">No: ${i.no}</span><br>
-    Null: ${i.nulls}
-    `;
-}
-
-// 🔥 FILTROS EN CASCADA
-function updateDependentFilters(){
-
-    let mC = c_mun.value;
-    let aC = c_apl.value;
-
-    let barriosC = [...new Set(
-        dataC.features
-        .filter(f=>{
-            if(mC && f.properties.USER_Municipio!=mC) return false;
-            if(aC && f.properties.APLICA!=aC) return false;
-            return true;
-        })
-        .map(f=>f.properties.USER_Barrio)
-    )];
-
-    let selC = c_bar.value;
-    c_bar.innerHTML="<option value=''>All</option>";
-    barriosC.forEach(v=>c_bar.innerHTML+=`<option ${v==selC?'selected':''}>${v}</option>`);
-
-
-    let mI = i_mun.value;
-    let aI = i_apl.value;
-
-    let barriosI = [...new Set(
-        dataI.features
-        .filter(f=>{
-            if(mI && f.properties.USER_Ciudad!=mI) return false;
-            if(aI && f.properties.APLICA!=aI) return false;
-            return true;
-        })
-        .map(f=>f.properties.USER_Barrio)
-    )];
-
-    let selI = i_bar.value;
-    i_bar.innerHTML="<option value=''>All</option>";
-    barriosI.forEach(v=>i_bar.innerHTML+=`<option ${v==selI?'selected':''}>${v}</option>`);
-}
-
-// DRAW
-function draw(){
-
-    layerC.clearLayers();
-    layerI.clearLayers();
-
-    let fC = filterC();
-    let fI = filterI();
-
-    let boundsC = [];
-    let boundsI = [];
-
-    fC.features.forEach(f=>{
-        let latlng=[f.geometry.coordinates[1],f.geometry.coordinates[0]];
-
-        let m = L.circleMarker(latlng,{
-            radius:5,
-            fillColor:getColor("blue",f.properties.APLICA),
-            color:"#333",
-            weight:0.7,
-            fillOpacity:0.7
-        });
-
-        m.baseColor="blue";
-        m.id=f.properties.USER_id_simulado;
-        m.layerName="candidata";
-
-        m.on('popupopen', function(){
-            window.currentMarker = m;
-        });
-
-        m.bindPopup(`
-        <b>Razón Social:</b> ${f.properties.USER_Razon_Social}<br>
-        <b>Dirección:</b> ${f.properties.USER_Direccion}<br>
-        <b>Barrio:</b> ${f.properties.USER_Barrio}<br>
-        <b>Municipio:</b> ${f.properties.USER_Municipio}<br>
-        <b>Canal:</b> ${f.properties.canal_match}<br>
-        <b>Tipificación:</b> ${f.properties.Tipificacion_match}<br><br>
-
-        <select onchange="updateSingle('${m.id}','candidata',this.value,window.currentMarker)">
-          <option value="">NULL</option>
-          <option value="SI">SI</option>
-          <option value="NO">NO</option>
-        </select>
-        `);
-
-        layerC.addLayer(m);
-        boundsC.push(latlng);
-    });
-
-    fI.features.forEach(f=>{
-        let latlng=[f.geometry.coordinates[1],f.geometry.coordinates[0]];
-
-        let m = L.circleMarker(latlng,{
-            radius:5,
-            fillColor:getColor("gold",f.properties.APLICA),
-            color:"#333",
-            weight:0.7,
-            fillOpacity:0.7
-        });
-
-        m.baseColor="gold";
-        m.id=f.properties["USER_Numero_identificación"];
-        m.layerName="inicial";
-
-        m.on('popupopen', function(){
-            window.currentMarker = m;
-        });
-
-        m.bindPopup(`
-        <b>Razón Social:</b> ${f.properties["USER_Razón_social"]}<br>
-        <b>Nombre establecimiento:</b> ${f.properties.USER_Nombre_establecimiento}<br>
-        <b>Dirección:</b> ${f.properties["USER_Dirección"]}<br>
-        <b>Barrio:</b> ${f.properties.USER_Barrio}<br>
-        <b>Municipio:</b> ${f.properties.USER_Ciudad}<br>
-        <b>Canal:</b> ${f.properties.USER_Canal}<br><br>
-
-        <select onchange="updateSingle('${m.id}','inicial',this.value,window.currentMarker)">
-          <option value="">NULL</option>
-          <option value="SI">SI</option>
-          <option value="NO">NO</option>
-        </select>
-        `);
-
-        layerI.addLayer(m);
-        boundsI.push(latlng);
-    });
-
-    let hasFilterC = c_mun.value || c_bar.value || c_apl.value;
-    let hasFilterI = i_mun.value || i_bar.value || i_apl.value;
-
-    if(!initialBounds && (boundsC.length || boundsI.length)){
-        initialBounds = L.latLngBounds(boundsC.concat(boundsI));
-    }
-
-    if(hasFilterC && boundsC.length){
-        map.fitBounds(boundsC,{padding:[20,20]});
-    }
-    else if(hasFilterI && boundsI.length){
-        map.fitBounds(boundsI,{padding:[20,20]});
-    }
-    else if(!hasFilterC && !hasFilterI && initialBounds){
-        map.fitBounds(initialBounds,{padding:[20,20]});
-    }
-
-    updateCounter(fC,fI);
-}
-
-// FILTROS
-function filterC(){
-    let m=c_mun.value,b=c_bar.value,a=c_apl.value;
-    return {
-        features:dataC.features.filter(f=>{
-            if(m && f.properties.USER_Municipio!=m) return false;
-            if(b && f.properties.USER_Barrio!=b) return false;
-            if(a && f.properties.APLICA!=a) return false;
-            return true;
-        })
-    };
-}
-
-function filterI(){
-    let m=i_mun.value,b=i_bar.value,a=i_apl.value;
-    return {
-        features:dataI.features.filter(f=>{
-            if(m && f.properties.USER_Ciudad!=m) return false;
-            if(b && f.properties.USER_Barrio!=b) return false;
-            if(a && f.properties.APLICA!=a) return false;
-            return true;
-        })
-    };
-}
-
-// RESET
-function resetC(){c_mun.value="";c_bar.value="";c_apl.value="";updateDependentFilters();draw();}
-function resetI(){i_mun.value="";i_bar.value="";i_apl.value="";updateDependentFilters();draw();}
-
-// LOAD
-function load(){
-    fetch("/data")
-    .then(r=>r.json())
-    .then(d=>{
-        dataC=d.candidata;
-        dataI=d.inicial;
-        populate();
+    fetch("/data?bbox=" + bbox)
+      .then(r => r.json())
+      .then(d => {
+        // Merge: combinar datos nuevos con los ya en memoria
+        mergeData(d.candidata, d.inicial);
         updateDependentFilters();
         draw();
+        document.getElementById("loading").style.display = "none";
+      })
+      .catch(() => {
+        document.getElementById("loading").style.display = "none";
+      });
+  }, 300);
+}
+
+// ─────────────────────────────────────────────
+// MERGE: agrega features nuevas sin duplicar
+// ─────────────────────────────────────────────
+function mergeData(newC, newI) {
+  if (!dataC) { dataC = newC; } else {
+    var existingIds = new Set(dataC.features.map(f => f.properties.USER_id_simulado));
+    newC.features.forEach(f => {
+      if (!existingIds.has(f.properties.USER_id_simulado)) {
+        dataC.features.push(f);
+      }
     });
+  }
+  if (!dataI) { dataI = newI; } else {
+    var existingIds2 = new Set(dataI.features.map(f => f.properties["USER_Numero_identificación"]));
+    newI.features.forEach(f => {
+      if (!existingIds2.has(f.properties["USER_Numero_identificación"])) {
+        dataI.features.push(f);
+      }
+    });
+  }
 }
 
-// POPULATE
-function populate(){
+// ─────────────────────────────────────────────
+// DRAW — solo dibuja features filtradas
+// 🔥 FIX 4: Usa renderer canvas en cada marker
+// ─────────────────────────────────────────────
+function draw() {
+  layerC.clearLayers();
+  layerI.clearLayers();
 
-    function fill(id,arr){
-        let s=document.getElementById(id);
-        s.innerHTML="<option value=''>All</option>";
-        arr.forEach(v=>s.innerHTML+=`<option>${v}</option>`);
-    }
+  if (!dataC || !dataI) return;
 
-    fill("c_mun",[...new Set(dataC.features.map(f=>f.properties.USER_Municipio))]);
-    fill("c_bar",[...new Set(dataC.features.map(f=>f.properties.USER_Barrio))]);
+  var fC = filterC();
+  var fI = filterI();
 
-    fill("i_mun",[...new Set(dataI.features.map(f=>f.properties.USER_Ciudad))]);
-    fill("i_bar",[...new Set(dataI.features.map(f=>f.properties.USER_Barrio))]);
+  var boundsC = [];
+  var boundsI = [];
 
-    fill("c_apl",["SI","NO"]);
-    fill("i_apl",["SI","NO"]);
+  fC.features.forEach(function(f) {
+    var latlng = [f.geometry.coordinates[1], f.geometry.coordinates[0]];
+
+    var m = L.circleMarker(latlng, {
+      renderer: renderer,   // 🔥 Canvas
+      radius: 5,
+      fillColor: getColor("blue", f.properties.APLICA),
+      color: "#333",
+      weight: 0.5,
+      fillOpacity: 0.75
+    });
+
+    m.baseColor = "blue";
+    m.id = f.properties.USER_id_simulado;
+    m.layerName = "candidata";
+    m.featureRef = f;
+
+    m.on('click', function() { window.currentMarker = m; });
+
+    // 🔥 FIX 5: Popup lazy — solo construye HTML cuando se abre
+    m.bindPopup(function() {
+      return `
+        <b>Razón Social:</b> ${f.properties.USER_Razon_Social || ''}<br>
+        <b>Dirección:</b> ${f.properties.USER_Direccion || ''}<br>
+        <b>Barrio:</b> ${f.properties.USER_Barrio || ''}<br>
+        <b>Municipio:</b> ${f.properties.USER_Municipio || ''}<br>
+        <b>Canal:</b> ${f.properties.canal_match || ''}<br>
+        <b>Tipificación:</b> ${f.properties.Tipificacion_match || ''}<br><br>
+        <select onchange="updateSingle('${m.id}','candidata',this.value,window.currentMarker)" style="font-size:12px;">
+          <option value="" ${!f.properties.APLICA ? 'selected' : ''}>NULL</option>
+          <option value="SI" ${f.properties.APLICA==='SI' ? 'selected' : ''}>SI</option>
+          <option value="NO" ${f.properties.APLICA==='NO' ? 'selected' : ''}>NO</option>
+        </select>
+      `;
+    }, { maxWidth: 260 });
+
+    layerC.addLayer(m);
+    boundsC.push(latlng);
+  });
+
+  fI.features.forEach(function(f) {
+    var latlng = [f.geometry.coordinates[1], f.geometry.coordinates[0]];
+
+    var m = L.circleMarker(latlng, {
+      renderer: renderer,   // 🔥 Canvas
+      radius: 5,
+      fillColor: getColor("goldenrod", f.properties.APLICA),
+      color: "#333",
+      weight: 0.5,
+      fillOpacity: 0.75
+    });
+
+    m.baseColor = "goldenrod";
+    m.id = f.properties["USER_Numero_identificación"];
+    m.layerName = "inicial";
+    m.featureRef = f;
+
+    m.on('click', function() { window.currentMarker = m; });
+
+    m.bindPopup(function() {
+      return `
+        <b>Razón Social:</b> ${f.properties["USER_Razón_social"] || ''}<br>
+        <b>Nombre:</b> ${f.properties.USER_Nombre_establecimiento || ''}<br>
+        <b>Dirección:</b> ${f.properties["USER_Dirección"] || ''}<br>
+        <b>Barrio:</b> ${f.properties.USER_Barrio || ''}<br>
+        <b>Municipio:</b> ${f.properties.USER_Ciudad || ''}<br>
+        <b>Canal:</b> ${f.properties.USER_Canal || ''}<br><br>
+        <select onchange="updateSingle('${m.id}','inicial',this.value,window.currentMarker)" style="font-size:12px;">
+          <option value="" ${!f.properties.APLICA ? 'selected' : ''}>NULL</option>
+          <option value="SI" ${f.properties.APLICA==='SI' ? 'selected' : ''}>SI</option>
+          <option value="NO" ${f.properties.APLICA==='NO' ? 'selected' : ''}>NO</option>
+        </select>
+      `;
+    }, { maxWidth: 260 });
+
+    layerI.addLayer(m);
+    boundsI.push(latlng);
+  });
+
+  // Fit bounds solo en la primera carga
+  if (!initialBounds && (boundsC.length || boundsI.length)) {
+    initialBounds = L.latLngBounds(boundsC.concat(boundsI));
+    map.fitBounds(initialBounds, { padding: [20, 20] });
+  }
+
+  updateCounter(fC, fI);
 }
 
-document.querySelectorAll("select").forEach(s=>{
-    s.onchange = function(){
-        updateDependentFilters();
-        draw();
+// ─────────────────────────────────────────────
+// SELECCIÓN POR RECTÁNGULO
+// ─────────────────────────────────────────────
+map.on('draw:created', function(e) {
+  selected = [];
+  var layer = e.layer;
+  drawnItems.clearLayers();
+  drawnItems.addLayer(layer);
+  var bounds = layer.getBounds();
+
+  layerC.eachLayer(function(m) {
+    if (m.getLatLng && bounds.contains(m.getLatLng())) {
+      selected.push(m);
+      m.setStyle({ color: "black", weight: 2 });
     }
+  });
+  layerI.eachLayer(function(m) {
+    if (m.getLatLng && bounds.contains(m.getLatLng())) {
+      selected.push(m);
+      m.setStyle({ color: "black", weight: 2 });
+    }
+  });
+
+  setTimeout(function() {
+    if (selected.length > 0) {
+      var val = prompt("Seleccionaste " + selected.length + " puntos. Escribe SI o NO");
+      if (!val) return;
+
+      if (confirm("¿Guardar cambios?")) {
+        var grupos = { candidata: [], inicial: [] };
+
+        selected.forEach(function(m) {
+          grupos[m.layerName].push(m.id);
+          m.setStyle({ fillColor: getColor(m.baseColor, val), color: "#333", weight: 0.5 });
+
+          var data = (m.layerName === "candidata") ? dataC : dataI;
+          var key = (m.layerName === "candidata") ? "USER_id_simulado" : "USER_Numero_identificación";
+          data.features.forEach(function(f) {
+            if (f.properties[key] == m.id) f.properties.APLICA = val || null;
+          });
+        });
+
+        Object.keys(grupos).forEach(function(lname) {
+          if (grupos[lname].length > 0) {
+            fetch("/update", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ layer: lname, ids: grupos[lname], aplica: val })
+            });
+          }
+        });
+
+        drawnItems.clearLayers();
+        selected = [];
+        updateCounter(filterC(), filterI());
+      }
+    }
+  }, 100);
 });
 
-function exportExcel(){
-    window.location="/export";
+// ─────────────────────────────────────────────
+// UPDATE SINGLE
+// ─────────────────────────────────────────────
+function updateSingle(id, layer, value, marker) {
+  fetch("/update", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ layer, ids: [id], aplica: value })
+  });
+
+  if (marker) marker.setStyle({ fillColor: getColor(marker.baseColor, value) });
+
+  var data = (layer === "candidata") ? dataC : dataI;
+  var key = (layer === "candidata") ? "USER_id_simulado" : "USER_Numero_identificación";
+  data.features.forEach(function(f) {
+    if (f.properties[key] == id) f.properties.APLICA = value || null;
+  });
+
+  updateCounter(filterC(), filterI());
 }
 
-load();
+// ─────────────────────────────────────────────
+// CONTADOR
+// ─────────────────────────────────────────────
+function updateCounter(fC, fI) {
+  function calc(features) {
+    var si = 0, no = 0, nulls = 0;
+    features.forEach(f => {
+      if (f.properties.APLICA === "SI") si++;
+      else if (f.properties.APLICA === "NO") no++;
+      else nulls++;
+    });
+    return { total: features.length, si, no, nulls };
+  }
+  var c = calc(fC.features);
+  var i = calc(fI.features);
+  document.getElementById("counter").innerHTML = `
+    <span style="color:#6699ff">● Candidata: ${c.total}</span><br>
+    <span style="color:#66ff66">  SI: ${c.si}</span> &nbsp;
+    <span style="color:#ff6666">NO: ${c.no}</span> &nbsp;
+    Null: ${c.nulls}<br><br>
+    <span style="color:gold">● Inicial: ${i.total}</span><br>
+    <span style="color:#66ff66">  SI: ${i.si}</span> &nbsp;
+    <span style="color:#ff6666">NO: ${i.no}</span> &nbsp;
+    Null: ${i.nulls}
+  `;
+}
+
+// ─────────────────────────────────────────────
+// FILTROS EN CASCADA
+// ─────────────────────────────────────────────
+function updateDependentFilters() {
+  if (!dataC || !dataI) return;
+
+  var mC = c_mun.value, aC = c_apl.value;
+  var barriosC = [...new Set(
+    dataC.features
+      .filter(f => (!mC || f.properties.USER_Municipio == mC) && (!aC || f.properties.APLICA == aC))
+      .map(f => f.properties.USER_Barrio)
+  )].sort();
+  var selC = c_bar.value;
+  c_bar.innerHTML = "<option value=''>All</option>";
+  barriosC.forEach(v => c_bar.innerHTML += `<option ${v == selC ? 'selected' : ''}>${v}</option>`);
+
+  var mI = i_mun.value, aI = i_apl.value;
+  var barriosI = [...new Set(
+    dataI.features
+      .filter(f => (!mI || f.properties.USER_Ciudad == mI) && (!aI || f.properties.APLICA == aI))
+      .map(f => f.properties.USER_Barrio)
+  )].sort();
+  var selI = i_bar.value;
+  i_bar.innerHTML = "<option value=''>All</option>";
+  barriosI.forEach(v => i_bar.innerHTML += `<option ${v == selI ? 'selected' : ''}>${v}</option>`);
+}
+
+function filterC() {
+  if (!dataC) return { features: [] };
+  var m = c_mun.value, b = c_bar.value, a = c_apl.value;
+  return {
+    features: dataC.features.filter(f =>
+      (!m || f.properties.USER_Municipio == m) &&
+      (!b || f.properties.USER_Barrio == b) &&
+      (!a || f.properties.APLICA == a)
+    )
+  };
+}
+
+function filterI() {
+  if (!dataI) return { features: [] };
+  var m = i_mun.value, b = i_bar.value, a = i_apl.value;
+  return {
+    features: dataI.features.filter(f =>
+      (!m || f.properties.USER_Ciudad == m) &&
+      (!b || f.properties.USER_Barrio == b) &&
+      (!a || f.properties.APLICA == a)
+    )
+  };
+}
+
+// ─────────────────────────────────────────────
+// RESET
+// ─────────────────────────────────────────────
+function resetC() { c_mun.value = ""; c_bar.value = ""; c_apl.value = ""; updateDependentFilters(); draw(); }
+function resetI() { i_mun.value = ""; i_bar.value = ""; i_apl.value = ""; updateDependentFilters(); draw(); }
+
+// ─────────────────────────────────────────────
+// POPULATE SELECTS (municipios/aplica — no barrios, esos son dependientes)
+// ─────────────────────────────────────────────
+function populate() {
+  function fill(id, arr) {
+    var s = document.getElementById(id);
+    s.innerHTML = "<option value=''>All</option>";
+    arr.sort().forEach(v => s.innerHTML += `<option>${v}</option>`);
+  }
+  fill("c_mun", [...new Set(dataC.features.map(f => f.properties.USER_Municipio))]);
+  fill("i_mun", [...new Set(dataI.features.map(f => f.properties.USER_Ciudad))]);
+  fill("c_apl", ["SI", "NO"]);
+  fill("i_apl", ["SI", "NO"]);
+}
+
+// ─────────────────────────────────────────────
+// CARGA INICIAL
+// ─────────────────────────────────────────────
+function initialLoad() {
+  // Primero: cargar todo para poblar filtros y encuadrar el mapa
+  document.getElementById("loading").style.display = "block";
+  fetch("/data")
+    .then(r => r.json())
+    .then(d => {
+      dataC = d.candidata;
+      dataI = d.inicial;
+      populate();
+      updateDependentFilters();
+
+      // Encuadrar mapa con todos los puntos
+      var all = dataC.features.concat(dataI.features)
+        .map(f => [f.geometry.coordinates[1], f.geometry.coordinates[0]]);
+      if (all.length) {
+        initialBounds = L.latLngBounds(all);
+        map.fitBounds(initialBounds, { padding: [20, 20] });
+      }
+
+      draw();
+      document.getElementById("loading").style.display = "none";
+
+      // 🔥 Después de la carga inicial, actualizar al mover/zoom
+      map.on('moveend', loadByBbox);
+    })
+    .catch(() => {
+      document.getElementById("loading").style.display = "none";
+    });
+}
+
+// ─────────────────────────────────────────────
+// EVENTOS DE FILTROS
+// ─────────────────────────────────────────────
+document.querySelectorAll("select").forEach(s => {
+  s.onchange = function() {
+    updateDependentFilters();
+    draw();
+  };
+});
+
+function exportExcel() { window.location = "/export"; }
+
+initialLoad();
 
 </script>
 </body>
